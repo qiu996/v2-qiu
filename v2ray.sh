@@ -455,10 +455,10 @@ echo "${DOMAIN}  points to: $res"
                 done
                 ;;
             3)
-                PROXY_URL="https://imeizi.me"
+                PROXY_URL="https://wetv.vip/"
                 ;;
             4)
-                PROXY_URL="https://bing.imeizi.me"
+                PROXY_URL="https://wetv.vip"
                 ;;
             5)
                 read -p " 请输入反代站点(以http或者https开头)：" PROXY_URL
