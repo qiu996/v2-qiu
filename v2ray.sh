@@ -427,10 +427,10 @@ echo "${DOMAIN}  points to: $res"
         colorEcho $BLUE " 请选择伪装站类型:"
         echo "   1) 静态网站(位于/usr/share/nginx/html)"
         echo "   2) 小说站(随机选择)"
-        echo "   3) 美女站(https://imeizi.me)"
+        echo "   3) 跨境腾讯视频(https://wetv.vip)"
         echo "   4) 高清壁纸站(https://www.pexels.com)"
         echo "   5) 自定义反代站点(需以http或者https开头)"
-        read -p "  请选择伪装网站类型[默认:高清壁纸站]" answer
+        read -p "  请选择伪装网站类型[默认:跨境腾讯视频]" answer
         if [[ -z "$answer" ]]; then
             PROXY_URL="https://www.pexels.com"
         else
