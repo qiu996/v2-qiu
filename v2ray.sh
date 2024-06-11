@@ -1821,11 +1821,7 @@ menu() {
     clear
     echo "#############################################################"
     echo -e "#                   ${RED}v2ray一键安装脚本${PLAIN}                      #"
-    echo -e "# ${GREEN}作者${PLAIN}: 网络跳越(hijk)                                      #"
-    echo -e "# ${GREEN}网址${PLAIN}: https://hijk.art                                    #"
-    echo -e "# ${GREEN}论坛${PLAIN}: https://hijk.club                                   #"
-    echo -e "# ${GREEN}TG群${PLAIN}: https://t.me/hijkclub                               #"
-    echo -e "# ${GREEN}Youtube频道${PLAIN}: https://youtube.com/channel/UCYTB--VsObzepVJtc9yvUxQ #"
+    echo -e "# ${GREEN}二改${PLAIN}: 勇友i                                           #"
     echo "#############################################################"
 
    echo -e "  ${GREEN}1.${PLAIN}   安装V2ray-VMESS"
