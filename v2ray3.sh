@@ -573,21 +573,23 @@ getCert() {
             systemctl start cron
             systemctl enable cron
         fi
+CERT_LOCK="/tmp/v2ray_cert_renewing"
+
         curl -sL https://get.acme.sh | sh -s email=hijk.pw@protonmail.ch
         source ~/.bashrc
         ~/.acme.sh/acme.sh  --upgrade  --auto-upgrade
         ~/.acme.sh/acme.sh --set-default-ca --server letsencrypt
         if [[ "$BT" = "false" ]]; then
 		if [[ ! -z "${res4}" ]]; then
-            ~/.acme.sh/acme.sh   --issue -d $DOMAIN --keylength ec-256 --pre-hook "systemctl stop nginx" --post-hook "systemctl restart nginx"  --standalone --listen-v6
+            ~/.acme.sh/acme.sh   --issue -d $DOMAIN --keylength ec-256 --pre-hook "touch $CERT_LOCK; systemctl stop nginx" --post-hook "systemctl restart nginx; rm -f $CERT_LOCK"  --standalone --listen-v6
 		else
-            ~/.acme.sh/acme.sh   --issue -d $DOMAIN --keylength ec-256 --pre-hook "systemctl stop nginx" --post-hook "systemctl restart nginx"  --standalone --listen-v6
+            ~/.acme.sh/acme.sh   --issue -d $DOMAIN --keylength ec-256 --pre-hook "touch $CERT_LOCK; systemctl stop nginx" --post-hook "systemctl restart nginx; rm -f $CERT_LOCK"  --standalone --listen-v6
 		fi
         else
 		if [[ ! -z "${res4}" ]]; then	
-            ~/.acme.sh/acme.sh   --issue -d $DOMAIN --keylength ec-256 --pre-hook "nginx -s stop || { echo -n ''; }" --post-hook "nginx -c /www/server/nginx/conf/nginx.conf || { echo -n ''; }"  --standalone --listen-v6
+            ~/.acme.sh/acme.sh   --issue -d $DOMAIN --keylength ec-256 --pre-hook "touch $CERT_LOCK; nginx -s stop || { echo -n ''; }" --post-hook "nginx -c /www/server/nginx/conf/nginx.conf || { echo -n ''; }; rm -f $CERT_LOCK"  --standalone --listen-v6
 		else
-            ~/.acme.sh/acme.sh   --issue -d $DOMAIN --keylength ec-256 --pre-hook "nginx -s stop || { echo -n ''; }" --post-hook "nginx -c /www/server/nginx/conf/nginx.conf || { echo -n ''; }"  --standalone --listen-v6
+            ~/.acme.sh/acme.sh   --issue -d $DOMAIN --keylength ec-256 --pre-hook "touch $CERT_LOCK; nginx -s stop || { echo -n ''; }" --post-hook "nginx -c /www/server/nginx/conf/nginx.conf || { echo -n ''; }; rm -f $CERT_LOCK"  --standalone --listen-v6
 		fi
         fi
         [[ -f ~/.acme.sh/${DOMAIN}_ecc/ca.cer ]] || {
@@ -1830,6 +1832,7 @@ installMonitor() {
     cat > $MONITOR_SCRIPT <<-EOF
 #!/bin/bash
 LOG="/var/log/check_v2ray_services.log"
+CERT_LOCK="/tmp/v2ray_cert_renewing"
 
 check_restart() {
     local name=\$1
@@ -1842,11 +1845,16 @@ check_restart() {
 }
 
 check_restart "v2ray" "systemctl is-active --quiet v2ray" "systemctl restart v2ray"
-if systemctl list-unit-files | grep -q '^nginx.service'; then
-    check_restart "nginx" "systemctl is-active --quiet nginx" "systemctl restart nginx"
+
+# 证书续签期间 acme.sh standalone 模式会临时停 nginx，跳过避免冲突
+if [[ -f "\$CERT_LOCK" ]]; then
+    echo "[\$(date '+%F %T')] 证书续签中，跳过 nginx 检查" >> \$LOG
 else
-    # 宝塔面板等非 systemd 管理的 nginx
-    check_restart "nginx" "pgrep -x nginx" "nginx -c /www/server/nginx/conf/nginx.conf || true"
+    if systemctl list-unit-files | grep -q '^nginx.service'; then
+        check_restart "nginx" "systemctl is-active --quiet nginx" "systemctl restart nginx"
+    else
+        check_restart "nginx" "pgrep -x nginx" "nginx -c /www/server/nginx/conf/nginx.conf || true"
+    fi
 fi
 EOF
     chmod +x $MONITOR_SCRIPT
