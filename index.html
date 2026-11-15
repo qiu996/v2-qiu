@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>后台登录</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Press Start 2P', 'Microsoft YaHei', monospace;
+        }
+
+        /* 复古蒸汽波背景 + 动态网格 */
+        body {
+            min-height: 100vh;
+            background: linear-gradient(135deg, #ff0080, #7928ca, #ff0080);
+            background-size: 200% 200%;
+            animation: gradientBG 8s ease infinite;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+            position: relative;
+        }
+
+        /* 动态渐变背景动画 */
+        @keyframes gradientBG {
+            0% { background-position: 0% 50%; }
+            50% { background-position: 100% 50%; }
+            100% { background-position: 0% 50%; }
+        }
+
+        /* 字母数字矩阵雨背景 */
+        .matrix-bg {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 0;
+            opacity: 0.55;
+        }
+
+        /* 复古网格叠加层 */
+        .grid-bg {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            background-image: 
+                linear-gradient(rgba(255,255,255,0.1) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(255,255,255,0.1) 1px, transparent 1px);
+            background-size: 50px 50px;
+            z-index: 0;
+        }
+
+        /* 3D悬浮登录卡片 */
+        .login-card {
+            background: rgba(20, 20, 40, 0.9);
+            border: 3px solid #00ffff;
+            border-radius: 12px;
+            padding: 40px;
+            width: 420px;
+            box-shadow: 
+                0 0 20px #00ffff,
+                0 0 40px #ff0080,
+                0 15px 30px rgba(0,0,0,0.5);
+            position: relative;
+            z-index: 1;
+            transform-style: preserve-3d;
+            transition: all 0.4s ease;
+            animation: float3D 6s ease-in-out infinite;
+        }
+
+        /* 3D悬浮动画 */
+        @keyframes float3D {
+            0%, 100% { transform: translateY(0px) rotateY(0deg); }
+            25% { transform: translateY(-10px) rotateY(5deg); }
+            50% { transform: translateY(0px) rotateY(0deg); }
+            75% { transform: translateY(-10px) rotateY(-5deg); }
+        }
+
+        /* 标题样式 - 动漫复古霓虹 */
+        .login-title {
+            text-align: center;
+            color: #fff;
+            font-size: 24px;
+            margin-bottom: 35px;
+            text-shadow: 
+                0 0 5px #00ffff,
+                0 0 10px #ff0080,
+                0 0 15px #00ffff;
+            letter-spacing: 2px;
+        }
+
+        /* 输入框组 */
+        .input-group {
+            margin-bottom: 25px;
+            position: relative;
+        }
+
+        /* 像素风输入框 */
+        .login-input {
+            width: 100%;
+            padding: 15px;
+            background: rgba(0,0,0,0.7);
+            border: 2px solid #00ffff;
+            border-radius: 6px;
+            color: #fff;
+            font-size: 14px;
+            outline: none;
+            transition: all 0.3s;
+            box-shadow: 0 0 8px rgba(0,255,255,0.3);
+        }
+
+        .login-input:focus {
+            border-color: #ff0080;
+            box-shadow: 0 0 15px #ff0080;
+            transform: scale(1.02);
+        }
+
+        /* 复古霓虹按钮 */
+        .login-btn {
+            width: 100%;
+            padding: 18px;
+            background: linear-gradient(45deg, #ff0080, #00ffff);
+            border: none;
+            border-radius: 6px;
+            color: #000;
+            font-size: 16px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.3s;
+            box-shadow: 0 0 15px rgba(255,0,128,0.5);
+            margin-top: 10px;
+        }
+
+        .login-btn:hover {
+            transform: translateY(-3px) scale(1.03);
+            box-shadow: 0 0 25px rgba(255,0,128,0.8);
+        }
+
+        .login-btn:active {
+            transform: translateY(1px);
+        }
+
+        /* 底部链接 */
+        .login-links {
+            text-align: center;
+            margin-top: 25px;
+        }
+
+        .login-links a {
+            color: #00ffff;
+            text-decoration: none;
+            font-size: 12px;
+            margin: 0 10px;
+            transition: 0.3s;
+        }
+
+        .login-links a:hover {
+            color: #ff0080;
+            text-shadow: 0 0 8px #ff0080;
+        }
+
+        /* 响应式适配 */
+        @media (max-width: 480px) {
+            .login-card {
+                width: 90%;
+                padding: 30px 20px;
+            }
+            .login-title {
+                font-size: 20px;
+            }
+        }
+    </style>
+    <!-- 引入像素复古字体 -->
+    <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+</head>
+<body>
+    <canvas class="matrix-bg"></canvas>
+    <div class="grid-bg"></div>
+    
+    <div class="login-card">
+        <h2 class="login-title">ANIME LOGIN</h2>
+        
+        <div class="input-group">
+            <input type="text" class="login-input" placeholder="用户名 / USERNAME" required>
+        </div>
+        
+        <div class="input-group">
+            <input type="password" class="login-input" placeholder="密码 / PASSWORD" required>
+        </div>
+        
+        <button class="login-btn">登 录 进 入</button>
+        
+        <div class="login-links">
+            <a href="#">注册账号</a>
+            <a href="#">忘记密码</a>
+        </div>
+    </div>
+
+    <script>
+        // 字母 + 数字矩阵雨背景
+        (function () {
+            const canvas = document.querySelector('.matrix-bg');
+            const ctx = canvas.getContext('2d');
+            const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+            const fontSize = 16;
+            let columns = 0;
+            let drops = [];
+
+            function resize() {
+                const dpr = window.devicePixelRatio || 1;
+                canvas.width = window.innerWidth * dpr;
+                canvas.height = window.innerHeight * dpr;
+                ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+                columns = Math.floor(window.innerWidth / fontSize);
+                drops = Array.from({ length: columns }, () => Math.random() * -60);
+            }
+
+            function draw() {
+                const w = window.innerWidth;
+                const h = window.innerHeight;
+                // 拖尾效果：每帧盖一层半透明暗色
+                ctx.fillStyle = 'rgba(10, 0, 25, 0.12)';
+                ctx.fillRect(0, 0, w, h);
+
+                ctx.font = fontSize + "px 'Press Start 2P', monospace";
+                for (let i = 0; i < columns; i++) {
+                    const x = i * fontSize;
+                    const y = drops[i] * fontSize;
+                    const ch = chars[Math.floor(Math.random() * chars.length)];
+
+                    if (y > 0) {
+                        // 亮头：白 / 青
+                        ctx.shadowColor = '#00ffff';
+                        ctx.shadowBlur = 8;
+                        ctx.fillStyle = Math.random() > 0.75 ? '#ffffff' : '#00ffff';
+                        ctx.fillText(ch, x, y);
+                        // 拖尾字符：品红
+                        ctx.shadowColor = '#ff0080';
+                        ctx.shadowBlur = 6;
+                        ctx.fillStyle = 'rgba(255, 0, 128, 0.85)';
+                        ctx.fillText(chars[Math.floor(Math.random() * chars.length)], x, y - fontSize);
+                    }
+                    ctx.shadowBlur = 0;
+
+                    if (y > h && Math.random() > 0.95) {
+                        drops[i] = 0;
+                    }
+                    drops[i]++;
+                }
+            }
+
+            resize();
+            window.addEventListener('resize', resize);
+            setInterval(draw, 50);
+        })();
+
+        // 鼠标跟随3D效果
+        const card = document.querySelector('.login-card');
+        document.addEventListener('mousemove', (e) => {
+            const x = (window.innerWidth / 2 - e.clientX) / 25;
+            const y = (window.innerHeight / 2 - e.clientY) / 25;
+            card.style.transform = `rotateY(${x}deg) rotateX(${y}deg) translateY(0px)`;
+        });
+
+        // 鼠标离开恢复悬浮动画
+        document.addEventListener('mouseleave', () => {
+            card.style.animation = 'float3D 6s ease-in-out infinite';
+        });
+    </script>
+</body>
+</html>
