@@ -236,6 +236,7 @@ check_available() {
 ask_settings() {
     local answer old_domain="$DOMAIN" old_port="$LOCAL_PORT" old_email="$EMAIL"
     read -r -p "网站域名（只填域名）${DOMAIN:+ [$DOMAIN]}：" answer
+    answer=${answer//[[:space:]]/}
     DOMAIN=${answer:-$DOMAIN}; DOMAIN=${DOMAIN,,}
     valid_domain "$DOMAIN" || die '域名格式不正确；不要填写 https://、端口、路径或通配符。'
     WEBROOT="$WEBROOT_BASE/$DOMAIN"
