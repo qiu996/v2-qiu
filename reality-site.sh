@@ -361,6 +361,16 @@ EOF
     cat <<EOF
     root * $root
     encode gzip
+    # 日志放在网页目录，必须拒绝外部访问，否则会把访问者 IP 公开出去。
+    @hidden path /web.log*
+    respond @hidden 404
+    log {
+        output file $root/web.log {
+            roll_size 10MiB
+            roll_keep 5
+        }
+        format console
+    }
     file_server
 }
 EOF
@@ -373,10 +383,10 @@ write_page() {
     [[ -s "$1" ]] || die '拉取到的首页为空，本次已停止。'
 }
 
-# 随机 8 位十六进制文件名，内容为带当天日期标记的 Hysteria2 链接。
+# 随机 16 位十六进制文件名，内容为带当天日期标记的 Hysteria2 链接。
 write_link() {
     local root="$1" name
-    name=$(od -An -N4 -tx1 /dev/urandom | tr -d ' \n')
+    name=$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')
     printf 'hysteria2://1.1.1@127.0.0.1:443?alpn=h3&insecure=1#%s号到期\n' "$(date +%-d)" > "$STAGE/$name"
     install -m 644 "$STAGE/$name" "$root/$name"
 }
@@ -390,7 +400,9 @@ apply_site() {
     unmask_install_caddy
     exec_start=$(systemctl show caddy -p ExecStart --value)
     [[ "$exec_start" =~ $config_arg_re ]] || die 'caddy.service 使用了不同的配置路径，需要人工确认。'
-    install -d -m 755 "$config_dir" "$WEBROOT"
+    install -d -m 755 "$config_dir"
+    # 日志写在网页目录，目录需归 caddy 所有，轮转后 Caddy 才能重新创建文件。
+    install -d -m 755 -o caddy -g caddy "$WEBROOT"
     write_caddyfile "$DOMAIN" "$LOCAL_PORT" "$EMAIL" "$WEBROOT" > "$STAGE/Caddyfile"
     caddy fmt --overwrite "$STAGE/Caddyfile"
     # Validate under /etc/caddy, with restored labels, rather than asking a confined
@@ -453,6 +465,7 @@ verify_site() {
             fi
             printf '\n公网访问地址：https://%s:%s/\n' "$DOMAIN" "$LOCAL_PORT"
             printf '网页目录：%s（首页文件：index.html）\n配置备份：%s\n' "$WEBROOT" "$BACKUP"
+            printf '访问日志：%s/web.log（已禁止外部访问；自动轮转 10MiB×5）\n' "$WEBROOT"
             printf '自定义网页：通过SSH工具的文件管理器上传HTML、CSS、JS和图片，保存后刷新浏览器即可。\n'
             printf '只改网页无需重跑脚本；再次部署会保留已有网页内容。\n'
             printf '\n证书由Caddy自动续期，无需另装证书工具或定时任务。\n'
