@@ -454,7 +454,7 @@ EOF
 }
 
 apply_site() {
-    local active=0 exec_start config_dir
+    local exec_start config_dir
     local config_arg_re='(^|[[:space:]])--config(=|[[:space:]]+)/etc/caddy/Caddyfile([[:space:];]|$)'
     config_dir=$(dirname "$CONFIG")
     id caddy >/dev/null 2>&1 || die 'Caddy 软件包没有创建 caddy 用户。'
@@ -487,13 +487,13 @@ apply_site() {
         write_link "$WEBROOT"
     fi
     if has restorecon; then restorecon -R "$WEBROOT" "$config_dir"; fi
-    systemctl is-active --quiet caddy && active=1
     install -m 644 "$STAGE/Caddyfile" "$CONFIG"
     if has restorecon; then restorecon "$CONFIG"; fi
-    if ! { if (( active )); then systemctl reload caddy; else systemctl start caddy; fi; }; then
+    # 用 restart 而非 reload：reload 偶发不重新加载配置（日志段不生效）。
+    if ! systemctl restart caddy; then
         if [[ -f "$BACKUP/Caddyfile" ]]; then
             cp -p -- "$BACKUP/Caddyfile" "$CONFIG"
-            if (( active )); then systemctl reload caddy || true; fi
+            systemctl restart caddy || true
         else
             rm -f -- "$CONFIG"
         fi
