@@ -373,6 +373,14 @@ write_page() {
     [[ -s "$1" ]] || die '拉取到的首页为空，本次已停止。'
 }
 
+# 随机 8 位十六进制文件名，内容为带当天日期标记的 Hysteria2 链接。
+write_link() {
+    local root="$1" name
+    name=$(od -An -N4 -tx1 /dev/urandom | tr -d ' \n')
+    printf 'hysteria2://1.1.1@127.0.0.1:443?alpn=h3&insecure=1#%s号到期\n' "$(date +%-d)" > "$STAGE/$name"
+    install -m 644 "$STAGE/$name" "$root/$name"
+}
+
 apply_site() {
     local active=0 exec_start config_dir
     local config_arg_re='(^|[[:space:]])--config(=|[[:space:]]+)/etc/caddy/Caddyfile([[:space:];]|$)'
@@ -402,6 +410,7 @@ apply_site() {
     if [[ ! -f "$WEBROOT/index.html" ]]; then
         write_page "$STAGE/index.html"
         install -m 644 "$STAGE/index.html" "$WEBROOT/index.html"
+        write_link "$WEBROOT"
     fi
     if has restorecon; then restorecon -R "$WEBROOT" "$config_dir"; fi
     systemctl is-active --quiet caddy && active=1
