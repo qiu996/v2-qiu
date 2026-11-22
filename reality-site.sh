@@ -397,12 +397,29 @@ write_log_formatter() {
 root="${1:?}"
 src="$root/.access.jsonl"
 dst="$root/web.log"
+cache=/var/cache/reality-site/ipgeo
+mkdir -p "$(dirname "$cache")"
+
+geo_of() {
+    ip="$1"
+    case "$ip" in
+        127.*|10.*|192.168.*|172.1[6-9].*|172.2[0-9].*|172.3[01].*|::1|fe80:*|fc*|fd*)
+            printf '内网'; return ;;
+    esac
+    hit=$(awk -F'|' -v k="$ip" '$1 == k {print $2; exit}' "$cache" 2>/dev/null)
+    if [ -n "$hit" ]; then printf '%s' "$hit"; return; fi
+    geo=$(curl -s --max-time 3 "http://ip-api.com/line/$ip?lang=zh-CN&fields=country,regionName,city,isp" | awk '!seen[$0]++' | paste -sd' ' -)
+    case "$geo" in fail*|invalid*|'') geo='未知' ;; esac
+    printf '%s|%s\n' "$ip" "$geo" >> "$cache"
+    printf '%s' "$geo"
+}
+
 while [ ! -f "$src" ]; do sleep 2; done
 tail -n 0 -F "$src" 2>/dev/null | while IFS= read -r line; do
     ip=$(printf '%s\n' "$line" | sed -n 's/.*"remote_ip":"\([^"]*\)".*/\1/p')
     ts=$(printf '%s\n' "$line" | sed -n 's/.*"ts":\([0-9.]*\).*/\1/p')
     [ -n "$ip" ] && [ -n "$ts" ] || continue
-    printf '%s---%s\n' "$ip" "$(date -d "@$ts" '+%Y-%m-%d---%H:%M:%S')" >> "$dst"
+    printf '%s---%s---%s\n' "$ip" "$(geo_of "$ip")" "$(date -d "@$ts" '+%Y-%m-%d---%H:%M:%S')" >> "$dst"
 done
 EOF
     chmod 755 /usr/local/sbin/reality-site-log.sh
@@ -511,7 +528,7 @@ verify_site() {
             fi
             printf '\n公网访问地址：https://%s:%s/\n' "$DOMAIN" "$LOCAL_PORT"
             printf '网页目录：%s（首页文件：index.html）\n配置备份：%s\n' "$WEBROOT" "$BACKUP"
-            printf '访问日志：%s/web.log（每行 "客户端IP---日期---时间"；原始JSON在 .access.jsonl）\n' "$WEBROOT"
+            printf '访问日志：%s/web.log（每行 "IP---归属地---日期---时间"；原始JSON在 .access.jsonl）\n' "$WEBROOT"
             printf '自定义网页：通过SSH工具的文件管理器上传HTML、CSS、JS和图片，保存后刷新浏览器即可。\n'
             printf '只改网页无需重跑脚本；再次部署会保留已有网页内容。\n'
             printf '\n证书由Caddy自动续期，无需另装证书工具或定时任务。\n'
