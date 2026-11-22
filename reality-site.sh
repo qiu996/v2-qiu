@@ -361,15 +361,14 @@ EOF
     cat <<EOF
     root * $root
     encode gzip
-    # 日志放在网页目录，必须拒绝外部访问，否则会把访问者 IP 公开出去。
-    @hidden path /web.log*
+    # 日志文件在网页目录内，必须拒绝外部访问，否则会公开访问者信息。
+    @hidden path /web.log* /.access.jsonl*
     respond @hidden 404
     log {
-        output file $root/web.log {
+        output file $root/.access.jsonl {
             roll_size 10MiB
-            roll_keep 5
+            roll_keep 2
         }
-        format console
     }
     file_server
 }
@@ -389,6 +388,52 @@ write_link() {
     name=$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')
     printf 'hysteria2://1.1.1@127.0.0.1:443?alpn=h3&insecure=1#%s号到期\n' "$(date +%-d)" > "$STAGE/$name"
     install -m 644 "$STAGE/$name" "$root/$name"
+}
+
+# Caddy 无法自定义日志格式：保留 JSON 原始日志，由这个服务转成简单单行。
+write_log_formatter() {
+    cat > /usr/local/sbin/reality-site-log.sh <<'EOF'
+#!/bin/sh
+root="${1:?}"
+src="$root/.access.jsonl"
+dst="$root/web.log"
+while [ ! -f "$src" ]; do sleep 2; done
+tail -n 0 -F "$src" 2>/dev/null | while IFS= read -r line; do
+    ip=$(printf '%s\n' "$line" | sed -n 's/.*"remote_ip":"\([^"]*\)".*/\1/p')
+    ts=$(printf '%s\n' "$line" | sed -n 's/.*"ts":\([0-9.]*\).*/\1/p')
+    [ -n "$ip" ] && [ -n "$ts" ] || continue
+    printf '%s---%s\n' "$ip" "$(date -d "@$ts" '+%Y-%m-%d---%H:%M:%S')" >> "$dst"
+done
+EOF
+    chmod 755 /usr/local/sbin/reality-site-log.sh
+    if has logrotate; then
+        cat > /etc/logrotate.d/reality-site <<EOF
+$WEBROOT/web.log {
+    weekly
+    rotate 4
+    compress
+    missingok
+    notifempty
+    copytruncate
+}
+EOF
+    fi
+    cat > /etc/systemd/system/reality-site-log.service <<EOF
+[Unit]
+Description=reality-site access log formatter
+After=caddy.service
+
+[Service]
+ExecStart=/usr/local/sbin/reality-site-log.sh $WEBROOT
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    systemctl daemon-reload
+    systemctl enable reality-site-log.service >/dev/null 2>&1 || true
+    systemctl restart reality-site-log.service || true
 }
 
 apply_site() {
@@ -444,6 +489,7 @@ apply_site() {
     write_state active > "$STAGE/state"
     install -m 600 "$STAGE/state" "$STATE"
     systemctl enable caddy
+    write_log_formatter
 }
 
 verify_site() {
@@ -465,7 +511,7 @@ verify_site() {
             fi
             printf '\n公网访问地址：https://%s:%s/\n' "$DOMAIN" "$LOCAL_PORT"
             printf '网页目录：%s（首页文件：index.html）\n配置备份：%s\n' "$WEBROOT" "$BACKUP"
-            printf '访问日志：%s/web.log（已禁止外部访问；自动轮转 10MiB×5）\n' "$WEBROOT"
+            printf '访问日志：%s/web.log（每行 "客户端IP---日期---时间"；原始JSON在 .access.jsonl）\n' "$WEBROOT"
             printf '自定义网页：通过SSH工具的文件管理器上传HTML、CSS、JS和图片，保存后刷新浏览器即可。\n'
             printf '只改网页无需重跑脚本；再次部署会保留已有网页内容。\n'
             printf '\n证书由Caddy自动续期，无需另装证书工具或定时任务。\n'
