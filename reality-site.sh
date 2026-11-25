@@ -11,6 +11,8 @@ export LC_ALL=C
 
 CONFIG=/etc/caddy/Caddyfile
 STATE=/etc/caddy/reality-site.state
+LINK_STATE=/etc/caddy/reality-site.link
+TOKEN_STATE=/etc/caddy/reality-site.token
 WEBROOT_BASE=/var/www
 WEBROOT=''
 PAGE_URL=https://raw.githubusercontent.com/qiu996/v2-qiu/main/index.html
@@ -331,7 +333,7 @@ cleanup_deploy() {
 }
 
 write_caddyfile() {
-    local domain="$1" port="$2" email="${3:-}" root="${4:-$WEBROOT_BASE/$domain}" listen_bind=0.0.0.0
+    local domain="$1" port="$2" email="${3:-}" root="${4:-$WEBROOT_BASE/$domain}" link_name="$5" link_token="$6" listen_bind=0.0.0.0
     # Caddy inherits the site's bind address for ACME unless a global default is
     # set first. Use a public wildcard for both; Go's wildcard IPv6 TCP listener
     # also accepts IPv4 on dual-stack Linux.
@@ -362,8 +364,18 @@ EOF
     root * $root
     encode gzip
     # 日志文件在网页目录内，必须拒绝外部访问，否则会公开访问者信息。
-    @hidden path /web.log* /.access.jsonl*
+    @hidden path /web.log* /.access.jsonl* /link.txt
     respond @hidden 404
+EOF
+    # 随机文件必须带正确令牌，否则一律 404，避免只泄露路径就能访问。
+    cat <<EOF
+    @link_denied {
+        path /$link_name
+        not query k=$link_token
+    }
+    respond @link_denied 404
+EOF
+    cat <<EOF
     log {
         output file $root/.access.jsonl {
             roll_size 10MiB
@@ -383,18 +395,44 @@ write_page() {
 }
 
 # 随机 16 位十六进制文件名，内容为带当天日期标记的 Hysteria2 链接。
+# 文件名记录到 $LINK_STATE，重跑时复用；web.log 也只记录对这个文件的访问。
 write_link() {
-    local root="$1" name
-    name=$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')
-    printf 'hysteria2://1.1.1@127.0.0.1:443?alpn=h3&insecure=1#%s号到期\n' "$(date +%-d)" > "$STAGE/$name"
-    install -m 644 "$STAGE/$name" "$root/$name"
+    local root="$1" name='' token='' f
+    if [[ -s "$LINK_STATE" ]]; then
+        name=$(<"$LINK_STATE")
+    else
+        # 兼容旧部署：从网页目录里已有的 16 位十六进制文件名接管。
+        for f in "$root"/*; do
+            [[ -f $f ]] || continue
+            f=${f##*/}
+            [[ $f =~ ^[0-9a-f]{16}$ ]] && { name=$f; break; }
+        done
+        [[ -n $name ]] || name=$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')
+        printf '%s\n' "$name" > "$LINK_STATE"
+        chmod 600 "$LINK_STATE"
+    fi
+    if [[ -s "$TOKEN_STATE" ]]; then
+        token=$(<"$TOKEN_STATE")
+    else
+        token=$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')
+        printf '%s\n' "$token" > "$TOKEN_STATE"
+        chmod 600 "$TOKEN_STATE"
+    fi
+    if [[ ! -f "$root/$name" ]]; then
+        printf 'hysteria2://1.1.1@127.0.0.1:443?alpn=h3&insecure=1#%s号到期\n' "$(date +%-d)" > "$STAGE/$name"
+        install -m 644 "$STAGE/$name" "$root/$name"
+    fi
+    LINK_NAME=$name
+    LINK_TOKEN=$token
 }
 
 # Caddy 无法自定义日志格式：保留 JSON 原始日志，由这个服务转成简单单行。
 write_log_formatter() {
+    local root="$1" link_name="$2"
     cat > /usr/local/sbin/reality-site-log.sh <<'EOF'
 #!/bin/sh
 root="${1:?}"
+name="${2:?}"
 src="$root/.access.jsonl"
 dst="$root/web.log"
 cache=/var/cache/reality-site/ipgeo
@@ -416,6 +454,11 @@ geo_of() {
 
 while [ ! -f "$src" ]; do sleep 2; done
 tail -n 0 -F "$src" 2>/dev/null | while IFS= read -r line; do
+    uri=$(printf '%s\n' "$line" | sed -n 's/.*"uri":"\([^"]*\)".*/\1/p')
+    uri=${uri%%\?*}
+    [ "$uri" = "/$name" ] || continue
+    status=$(printf '%s\n' "$line" | sed -n 's/.*"status":\([0-9]*\).*/\1/p')
+    [ "$status" = 200 ] || continue
     ip=$(printf '%s\n' "$line" | sed -n 's/.*"remote_ip":"\([^"]*\)".*/\1/p')
     ts=$(printf '%s\n' "$line" | sed -n 's/.*"ts":\([0-9.]*\).*/\1/p')
     [ -n "$ip" ] && [ -n "$ts" ] || continue
@@ -441,7 +484,7 @@ Description=reality-site access log formatter
 After=caddy.service
 
 [Service]
-ExecStart=/usr/local/sbin/reality-site-log.sh $WEBROOT
+ExecStart=/usr/local/sbin/reality-site-log.sh $root $link_name
 Restart=always
 RestartSec=3
 
@@ -465,7 +508,11 @@ apply_site() {
     install -d -m 755 "$config_dir"
     # 日志写在网页目录，目录需归 caddy 所有，轮转后 Caddy 才能重新创建文件。
     install -d -m 755 -o caddy -g caddy "$WEBROOT"
-    write_caddyfile "$DOMAIN" "$LOCAL_PORT" "$EMAIL" "$WEBROOT" > "$STAGE/Caddyfile"
+    write_link "$WEBROOT"
+    write_caddyfile "$DOMAIN" "$LOCAL_PORT" "$EMAIL" "$WEBROOT" "$LINK_NAME" "$LINK_TOKEN" > "$STAGE/Caddyfile"
+    # 带令牌的完整链接存一份在网页目录，便于日后查看；已在 Caddy 中拒绝外部访问。
+    printf 'https://%s:%s/%s?k=%s\n' "$DOMAIN" "$LOCAL_PORT" "$LINK_NAME" "$LINK_TOKEN" > "$STAGE/link.txt"
+    install -m 644 "$STAGE/link.txt" "$WEBROOT/link.txt"
     caddy fmt --overwrite "$STAGE/Caddyfile"
     # Validate under /etc/caddy, with restored labels, rather than asking a confined
     # SELinux user to read a root-created file under /tmp.
@@ -484,7 +531,6 @@ apply_site() {
     if [[ ! -f "$WEBROOT/index.html" ]]; then
         write_page "$STAGE/index.html"
         install -m 644 "$STAGE/index.html" "$WEBROOT/index.html"
-        write_link "$WEBROOT"
     fi
     if has restorecon; then restorecon -R "$WEBROOT" "$config_dir"; fi
     install -m 644 "$STAGE/Caddyfile" "$CONFIG"
@@ -506,7 +552,7 @@ apply_site() {
     write_state active > "$STAGE/state"
     install -m 600 "$STAGE/state" "$STATE"
     systemctl enable caddy
-    write_log_formatter
+    write_log_formatter "$WEBROOT" "$LINK_NAME"
 }
 
 verify_site() {
@@ -528,7 +574,9 @@ verify_site() {
             fi
             printf '\n公网访问地址：https://%s:%s/\n' "$DOMAIN" "$LOCAL_PORT"
             printf '网页目录：%s（首页文件：index.html）\n配置备份：%s\n' "$WEBROOT" "$BACKUP"
-            printf '访问日志：%s/web.log（每行 "IP---归属地---日期---时间"；原始JSON在 .access.jsonl）\n' "$WEBROOT"
+            printf '访问日志：%s/web.log（仅记录带令牌访问 /%s 的成功请求）\n' "$WEBROOT" "$LINK_NAME"
+            printf '随机链接（含令牌，请勿公开）：https://%s:%s/%s?k=%s\n' "$DOMAIN" "$LOCAL_PORT" "$LINK_NAME" "$LINK_TOKEN"
+            printf '链接已保存：%s/link.txt（已禁止外部访问，只能用 SSH/SFTP 查看）\n' "$WEBROOT"
             printf '自定义网页：通过SSH工具的文件管理器上传HTML、CSS、JS和图片，保存后刷新浏览器即可。\n'
             printf '只改网页无需重跑脚本；再次部署会保留已有网页内容。\n'
             printf '\n证书由Caddy自动续期，无需另装证书工具或定时任务。\n'
