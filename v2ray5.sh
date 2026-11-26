@@ -44,6 +44,11 @@ http://www.tjwl.com/
 
 CONFIG_FILE="/etc/v2ray/config.json"
 SERVICE_FILE="/etc/systemd/system/v2ray.service"
+# 随机 16 位文件名与令牌，重跑时复用
+LINK_STATE="/etc/v2ray/reality-site.link"
+TOKEN_STATE="/etc/v2ray/reality-site.token"
+LINK_NAME=""
+LINK_TOKEN=""
 OS=`hostnamectl | grep -i system | cut -d: -f2`
 
 V6_PROXY=""
@@ -687,6 +692,103 @@ CERT_LOCK="/tmp/v2ray_cert_renewing"
     fi
 }
 
+# 随机 16 位十六进制文件名 + 32 位令牌，用于私密访问伪装站；
+# 文件名记录到 $LINK_STATE，重跑时复用；无令牌访问由 nginx 直接返回 404。
+writeLink() {
+    local root="/usr/share/nginx/html" name='' token='' f
+    mkdir -p "$root" /etc/v2ray
+    [[ -s "$LINK_STATE" ]] && name=$(<"$LINK_STATE")
+    [[ $name =~ ^[0-9a-f]{16}$ ]] || name=''
+    if [[ -z $name ]]; then
+        for f in "$root"/*; do
+            [[ -f $f ]] || continue
+            f=${f##*/}
+            [[ $f =~ ^[0-9a-f]{16}$ ]] && { name=$f; break; }
+        done
+        [[ -n $name ]] || name=$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')
+        printf '%s\n' "$name" > "$LINK_STATE"
+        chmod 600 "$LINK_STATE"
+    fi
+    [[ -s "$TOKEN_STATE" ]] && token=$(<"$TOKEN_STATE")
+    [[ $token =~ ^[0-9a-f]{32}$ ]] || token=''
+    if [[ -z $token ]]; then
+        token=$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')
+        printf '%s\n' "$token" > "$TOKEN_STATE"
+        chmod 600 "$TOKEN_STATE"
+    fi
+    if [[ ! -f "$root/$name" ]]; then
+        printf 'hysteria2://1.1.1@127.0.0.1:443?alpn=h3&insecure=1#%s号到期\n' "$(date +%-d)" > "$root/$name"
+        chmod 644 "$root/$name"
+    fi
+    LINK_NAME=$name
+    LINK_TOKEN=$token
+}
+
+# 记录私密文件的成功访问：只保留状态码 200，格式 来源IP---归属地---日期---时间，
+# 写入网页目录 web.log（nginx 已对该路径返回 404，只能 SSH/SFTP 查看）。
+writeLinkLog() {
+    cat > /usr/local/sbin/v2ray-link-log.sh <<'EOF'
+#!/bin/sh
+src=/var/log/nginx/reality-link.log
+dst=/usr/share/nginx/html/web.log
+cache=/var/cache/reality-link/ipgeo
+mkdir -p "$(dirname "$cache")"
+
+geo_of() {
+    ip="$1"
+    case "$ip" in
+        127.*|10.*|192.168.*|172.1[6-9].*|172.2[0-9].*|172.3[01].*|::1|fe80:*|fc*|fd*)
+            printf '内网'; return ;;
+    esac
+    hit=$(awk -F'|' -v k="$ip" '$1 == k {print $2; exit}' "$cache" 2>/dev/null)
+    if [ -n "$hit" ]; then printf '%s' "$hit"; return; fi
+    geo=$(curl -s --max-time 3 "http://ip-api.com/line/$ip?lang=zh-CN&fields=country,regionName,city,isp" | awk '!seen[$0]++' | paste -sd' ' -)
+    case "$geo" in fail*|invalid*|'') geo='未知' ;; esac
+    printf '%s|%s\n' "$ip" "$geo" >> "$cache"
+    printf '%s' "$geo"
+}
+
+while [ ! -f "$src" ]; do sleep 2; done
+tail -n 0 -F "$src" 2>/dev/null | while IFS= read -r line; do
+    status=$(printf '%s\n' "$line" | awk -F'"' '{print $3+0}')
+    [ "$status" = 200 ] || continue
+    ip=$(printf '%s\n' "$line" | awk '{print $1}')
+    ts=$(printf '%s\n' "$line" | sed -n 's/.*\[\([^]]*\)\].*/\1/p')
+    [ -n "$ip" ] && [ -n "$ts" ] || continue
+    printf '%s---%s---%s\n' "$ip" "$(geo_of "$ip")" "$(date -d "$ts" '+%Y-%m-%d---%H:%M:%S')" >> "$dst"
+done
+EOF
+    chmod 755 /usr/local/sbin/v2ray-link-log.sh
+    if command -v logrotate >/dev/null 2>&1; then
+        cat > /etc/logrotate.d/v2ray-link <<EOF
+/usr/share/nginx/html/web.log {
+    weekly
+    rotate 4
+    compress
+    missingok
+    notifempty
+    copytruncate
+}
+EOF
+    fi
+    cat > /etc/systemd/system/v2ray-link-log.service <<EOF
+[Unit]
+Description=v2ray private link access log formatter
+After=nginx.service
+
+[Service]
+ExecStart=/usr/local/sbin/v2ray-link-log.sh
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    systemctl daemon-reload
+    systemctl enable v2ray-link-log.service >/dev/null 2>&1 || true
+    systemctl restart v2ray-link-log.service || true
+}
+
 configNginx() {
     mkdir -p /usr/share/nginx/html;
     # 伪装站为静态网站时，拉取自定义首页到 nginx 站点目录
@@ -695,6 +797,10 @@ configNginx() {
         curl -fsSL ${STATIC_INDEX_URL} -o /usr/share/nginx/html/index.html \
             && colorEcho $BLUE " 首页已放到 /usr/share/nginx/html/index.html" \
             || colorEcho $RED " 首页拉取失败，请检查服务器网络后重试"
+        # 仅 TLS 站点生成随机私密文件，无 TLS 时 nginx 不提供站点
+        if [[ "$TLS" = "true" ]]; then
+            writeLink
+        fi
     fi
     if [[ "$ALLOW_SPIDER" = "n" ]]; then
         echo 'User-Agent: *' > /usr/share/nginx/html/robots.txt
@@ -763,6 +869,16 @@ EOF
         sub_filter_once off;"
     fi
 
+    # 随机文件必须带正确令牌，否则一律 404
+    if [[ -n "$LINK_NAME" ]]; then
+        LINK_CONFIG="location = /${LINK_NAME} {
+        if (\$arg_k != \"${LINK_TOKEN}\") { return 404; }
+        access_log /var/log/nginx/reality-link.log combined;
+    }"
+    else
+        LINK_CONFIG=""
+    fi
+
     if [[ "$TLS" = "true" || "$XTLS" = "true" ]]; then
         mkdir -p $NGINX_CONF_PATH
         # VMESS+WS+TLS
@@ -798,6 +914,9 @@ server {
         $action
     }
     $ROBOT_CONFIG
+    $LINK_CONFIG
+    location = /link.txt { return 404; }
+    location = /web.log { return 404; }
 
     location ${WSPATH} {
       proxy_redirect off;
@@ -827,9 +946,23 @@ server {
         $action
     }
     $ROBOT_CONFIG
+    $LINK_CONFIG
+    location = /link.txt { return 404; }
+    location = /web.log { return 404; }
 }
 EOF
         fi
+    fi
+
+    # 完整私密链接存一份，便于日后查看（不在网站目录，无法被外部访问）
+    if [[ -n "$LINK_NAME" ]]; then
+        mkdir -p /etc/v2ray
+        printf 'https://%s:%s/%s?k=%s\n' "$DOMAIN" "$PORT" "$LINK_NAME" "$LINK_TOKEN" > /etc/v2ray/link.txt
+        chmod 600 /etc/v2ray/link.txt
+        # 网页目录也放一份便于 SFTP 查看；nginx 已对 /link.txt 统一返回 404
+        cp -f /etc/v2ray/link.txt /usr/share/nginx/html/link.txt
+        chmod 644 /usr/share/nginx/html/link.txt
+        writeLinkLog
     fi
 }
 
@@ -1614,6 +1747,10 @@ uninstall() {
             rm -rf $NGINX_CONF_PATH${domain}.conf
         fi
         [[ -f ~/.acme.sh/acme.sh ]] && ~/.acme.sh/acme.sh --uninstall
+        # 清理私密文件访问记录服务
+        systemctl disable --now v2ray-link-log.service >/dev/null 2>&1 || true
+        rm -f /etc/systemd/system/v2ray-link-log.service /etc/logrotate.d/v2ray-link /usr/local/sbin/v2ray-link-log.sh
+        systemctl daemon-reload
         uninstallMonitor
         colorEcho $GREEN " V2ray卸载成功"
     fi
@@ -1830,6 +1967,19 @@ outputVmessWS() {
     echo -e "   ${BLUE}vmess链接:${PLAIN} $RED$link$PLAIN"
 }
 
+# 打印随机私密链接（未生成时静默跳过）
+showLinkInfo() {
+    local name token
+    [[ -s "$LINK_STATE" && -s "$TOKEN_STATE" ]] || return 0
+    name=$(<"$LINK_STATE")
+    token=$(<"$TOKEN_STATE")
+    [[ -n "$name" && -n "$token" ]] || return 0
+    echo ""
+    echo -e "   ${BLUE}私密链接(请勿公开): ${PLAIN}${RED}https://${domain:-$IP}:${port}/${name}?k=${token}${PLAIN}"
+    echo -e "   ${BLUE}链接备份: ${PLAIN}${RED}/etc/v2ray/link.txt${PLAIN}"
+    echo -e "   ${BLUE}访问记录: ${PLAIN}${RED}/usr/share/nginx/html/web.log${PLAIN}"
+}
+
 showInfo() {
     res=`status`
     if [[ $res -lt 2 ]]; then
@@ -1844,6 +1994,7 @@ showInfo() {
     colorEcho $BLUE " V2ray配置信息："
 
     getConfigFileInfo
+    showLinkInfo
 
     echo -e "   ${BLUE}协议: ${PLAIN} ${RED}${protocol}${PLAIN}"
     if [[ "$trojan" = "true" ]]; then
