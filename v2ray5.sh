@@ -748,14 +748,34 @@ geo_of() {
     printf '%s' "$geo"
 }
 
+# nginx 时间形如 27/Nov/2026:10:20:30 +0800，直接换算，不依赖 date -d 的解析
+fmt_time() {
+    ts="$1"
+    tp=${ts% *}
+    dp=${tp%%:*}
+    tm=${tp#*:}
+    d=${dp%%/*}
+    rest=${dp#*/}
+    mon=${rest%%/*}
+    y=${rest#*/}
+    case "$mon" in
+        Jan) m=01;; Feb) m=02;; Mar) m=03;; Apr) m=04;;
+        May) m=05;; Jun) m=06;; Jul) m=07;; Aug) m=08;;
+        Sep) m=09;; Oct) m=10;; Nov) m=11;; Dec) m=12;;
+        *) m="$mon";;
+    esac
+    [ -n "$d" ] && [ -n "$tm" ] || { printf '%s' "$ts"; return; }
+    printf '%s-%s-%s---%s' "$y" "$m" "$d" "$tm"
+}
+
 while [ ! -f "$src" ]; do sleep 2; done
 tail -n 0 -F "$src" 2>/dev/null | while IFS= read -r line; do
     status=$(printf '%s\n' "$line" | awk -F'"' '{print $3+0}')
     [ "$status" = 200 ] || continue
     ip=$(printf '%s\n' "$line" | awk '{print $1}')
-    ts=$(printf '%s\n' "$line" | sed -n 's/.*\[\([^]]*\)\].*/\1/p')
+    ts=$(printf '%s\n' "$line" | sed -n 's/^[^[]*\[\([^]]*\)\].*/\1/p')
     [ -n "$ip" ] && [ -n "$ts" ] || continue
-    printf '%s---%s---%s\n' "$ip" "$(geo_of "$ip")" "$(date -d "$ts" '+%Y-%m-%d---%H:%M:%S')" >> "$dst"
+    printf '%s---%s---%s\n' "$ip" "$(geo_of "$ip")" "$(fmt_time "$ts")" >> "$dst"
 done
 EOF
     chmod 755 /usr/local/sbin/v2ray-link-log.sh
