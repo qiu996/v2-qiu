@@ -956,8 +956,10 @@ EOF
 
     # 完整私密链接存一份，便于日后查看（不在网站目录，无法被外部访问）
     if [[ -n "$LINK_NAME" ]]; then
+        local link_host="$DOMAIN"
+        [[ "$PORT" = "443" ]] || link_host="$DOMAIN:$PORT"
         mkdir -p /etc/v2ray
-        printf 'https://%s:%s/%s?k=%s\n' "$DOMAIN" "$PORT" "$LINK_NAME" "$LINK_TOKEN" > /etc/v2ray/link.txt
+        printf 'https://%s/%s?k=%s\n' "$link_host" "$LINK_NAME" "$LINK_TOKEN" > /etc/v2ray/link.txt
         chmod 600 /etc/v2ray/link.txt
         # 网页目录也放一份便于 SFTP 查看；nginx 已对 /link.txt 统一返回 404
         cp -f /etc/v2ray/link.txt /usr/share/nginx/html/link.txt
@@ -1969,13 +1971,15 @@ outputVmessWS() {
 
 # 打印随机私密链接（未生成时静默跳过）
 showLinkInfo() {
-    local name token
+    local name token link_host
     [[ -s "$LINK_STATE" && -s "$TOKEN_STATE" ]] || return 0
     name=$(<"$LINK_STATE")
     token=$(<"$TOKEN_STATE")
     [[ -n "$name" && -n "$token" ]] || return 0
+    link_host=${domain:-$IP}
+    [[ "$port" = "443" ]] || link_host="$link_host:$port"
     echo ""
-    echo -e "   ${BLUE}私密链接(请勿公开): ${PLAIN}${RED}https://${domain:-$IP}:${port}/${name}?k=${token}${PLAIN}"
+    echo -e "   ${BLUE}私密链接(请勿公开): ${PLAIN}${RED}https://${link_host}/${name}?k=${token}${PLAIN}"
     echo -e "   ${BLUE}链接备份: ${PLAIN}${RED}/etc/v2ray/link.txt${PLAIN}"
     echo -e "   ${BLUE}访问记录: ${PLAIN}${RED}/usr/share/nginx/html/web.log${PLAIN}"
 }
